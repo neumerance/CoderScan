@@ -24,7 +24,7 @@ const SUPPORTED_BARCODE_TYPES: BarcodeType[] = [
   "code39",
   "code93",
 ];
-const LIVE_SCAN_COOLDOWN_MS = 1200;
+const LIVE_SCAN_COOLDOWN_MS = 250;
 const MIN_ZOOM = 0;
 const MAX_ZOOM = 1;
 
@@ -218,6 +218,7 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
         <CameraView
           style={cameraStyle}
           facing="back"
+          autofocus="on"
           zoom={zoom}
           barcodeScannerSettings={{ barcodeTypes: SUPPORTED_BARCODE_TYPES }}
           onBarcodeScanned={handleLiveBarcodeScanned}
