@@ -31,6 +31,7 @@ type DetectedCollapsibleProps = {
   onReanalyze: () => void;
   onEditText: (oldText: string, newText: string) => void;
   hasNewToSave: boolean;
+  hasDataToSave?: boolean;
   emptyMessage?: string;
 };
 
@@ -45,6 +46,7 @@ export function DetectedCollapsible({
   onReanalyze,
   onEditText,
   hasNewToSave,
+  hasDataToSave = hasNewToSave,
   emptyMessage = "Snap and analyze a photo to extract text.",
 }: DetectedCollapsibleProps) {
   const [editing, setEditing] = useState<{ oldText: string; draftText: string } | null>(null);
@@ -145,10 +147,10 @@ export function DetectedCollapsible({
           <TouchableOpacity
             style={[
               styles.saveDetectedButton,
-              !hasNewToSave ? styles.saveButtonDisabled : null,
+              !hasDataToSave ? styles.saveButtonDisabled : null,
             ]}
             onPress={onSave}
-            disabled={!hasNewToSave}
+            disabled={!hasDataToSave}
           >
             <Text className="text-white text-center font-medium">Save</Text>
           </TouchableOpacity>

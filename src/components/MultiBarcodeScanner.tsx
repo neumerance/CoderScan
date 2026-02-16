@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Dimensions,
   Platform,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import type { GestureResponderEvent } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { extractTextFromImage, isSupported as isOcrSupported } from "expo-text-extractor";
@@ -20,8 +21,29 @@ const MAX_ZOOM = 1;
 
 type Mode = "camera" | "analyze";
 
+export type SavedScanSnapshot = {
+  imageUri: string;
+  detectedEntries: OcrEntry[];
+  savedTexts: string[];
+};
+
+export type SavedScanForUpdate = {
+  id: string;
+  imageUri: string;
+  detectedEntries: OcrEntry[];
+  savedTexts: string[];
+  createdAt: number;
+};
+
 type MultiBarcodeScannerProps = {
   onClose: () => void;
+  onItemsSaved?: (items: string[]) => void;
+  initialSession?: SavedScanSnapshot;
+  initialSessionForUpdate?: SavedScanForUpdate;
+  onSaveSession?: (
+    snapshot: SavedScanSnapshot,
+    existingScan?: SavedScanForUpdate
+  ) => void;
 };
 
 function distance(
@@ -33,28 +55,47 @@ function distance(
   return Math.hypot(x2 - x1, y2 - y1);
 }
 
-export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
+export function MultiBarcodeScanner({
+  onClose,
+  onItemsSaved,
+  initialSession,
+  initialSessionForUpdate,
+  onSaveSession,
+}: MultiBarcodeScannerProps) {
   const [permission, requestPermission] = useCameraPermissions();
-  const [mode, setMode] = useState<Mode>("camera");
-  const [capturedUri, setCapturedUri] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>(initialSession ? "analyze" : "camera");
+  const [capturedUri, setCapturedUri] = useState<string | null>(
+    initialSession?.imageUri ?? null
+  );
   const [zoom, setZoom] = useState(0);
-  const [isDetectedPanelCollapsed, setIsDetectedPanelCollapsed] = useState(true);
+  const [isDetectedPanelCollapsed, setIsDetectedPanelCollapsed] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [hasAnalyzedCurrentCapture, setHasAnalyzedCurrentCapture] = useState(false);
+  const [hasAnalyzedCurrentCapture, setHasAnalyzedCurrentCapture] = useState(
+    !!initialSession
+  );
   const [analysisError, setAnalysisError] = useState<string | null>(null);
-  const [detectedTexts, setDetectedTexts] = useState<OcrEntry[]>([]);
-  const [savedTexts, setSavedTexts] = useState<string[]>([]);
+  const [detectedTexts, setDetectedTexts] = useState<OcrEntry[]>(
+    initialSession?.detectedEntries ?? []
+  );
+  const [savedTexts, setSavedTexts] = useState<string[]>(
+    initialSession?.savedTexts ?? []
+  );
+
+  useEffect(() => {
+    if (initialSession) {
+      setMode("analyze");
+      setCapturedUri(initialSession.imageUri);
+      setDetectedTexts(initialSession.detectedEntries);
+      setSavedTexts(initialSession.savedTexts);
+      setHasAnalyzedCurrentCapture(true);
+      setIsDetectedPanelCollapsed(false);
+    }
+  }, [initialSession]);
 
   const cameraRef = useRef<CameraView | null>(null);
   const pinchRef = useRef<{ initialDistance: number; startZoom: number } | null>(null);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
-
-  const clearAll = useCallback(() => {
-    setDetectedTexts([]);
-    setSavedTexts([]);
-    setAnalysisError(null);
-  }, []);
 
   const handleTouchStart = useCallback((evt: GestureResponderEvent) => {
     const touches = evt.nativeEvent.touches;
@@ -197,10 +238,22 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
       existing.add(normalized);
       toAdd.push(entry.text);
     }
+    const newSavedTexts = toAdd.length > 0 ? [...savedTexts, ...toAdd] : savedTexts;
     if (toAdd.length > 0) {
-      setSavedTexts((prev) => [...prev, ...toAdd]);
+      setSavedTexts(newSavedTexts);
+      onItemsSaved?.(toAdd);
     }
-  }, [detectedTexts, savedTexts]);
+    if (capturedUri && onSaveSession && (newSavedTexts.length > 0 || detectedTexts.length > 0)) {
+      onSaveSession(
+        {
+          imageUri: capturedUri,
+          detectedEntries: detectedTexts,
+          savedTexts: newSavedTexts,
+        },
+        initialSessionForUpdate
+      );
+    }
+  }, [capturedUri, detectedTexts, savedTexts, onItemsSaved, onSaveSession, initialSessionForUpdate]);
 
   const clearDetected = useCallback(() => {
     setDetectedTexts([]);
@@ -234,6 +287,9 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
       ),
     [detectedTexts, savedTexts]
   );
+
+  const hasDataToSave =
+    hasNewDetectedToSave || savedTexts.length > 0 || detectedTexts.length > 0;
 
   if (!permission) {
     return (
@@ -286,18 +342,12 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
       )}
 
       <View style={styles.overlay} pointerEvents="box-none">
-        <View className="flex-row justify-between items-center pt-12 px-4">
+        <View className="flex-row items-center pt-12 px-4">
           <TouchableOpacity
-            className="bg-white/20 rounded-xl py-2.5 px-4"
+            className="bg-white/20 rounded-xl py-2.5 px-3"
             onPress={onClose}
           >
-            <Text className="text-white font-medium">Close</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            className="bg-white/20 rounded-xl py-2.5 px-4"
-            onPress={clearAll}
-          >
-            <Text className="text-white font-medium">Clear list</Text>
+            <Ionicons name="arrow-back" size={22} color="#fff" />
           </TouchableOpacity>
         </View>
 
@@ -344,6 +394,7 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
           onReanalyze={handleReanalyze}
           onEditText={handleEditDetectedText}
           hasNewToSave={hasNewDetectedToSave}
+          hasDataToSave={hasDataToSave}
           emptyMessage="Snap and analyze a photo to extract text."
         />
       ) : null}
