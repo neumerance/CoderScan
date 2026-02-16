@@ -1,18 +1,18 @@
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  ScrollView,
-  StyleSheet,
   Dimensions,
   Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import type {
+  BarcodeBounds,
   BarcodeScanningResult,
   BarcodeType,
-  BarcodeBounds,
 } from "expo-camera";
 
 const SUPPORTED_BARCODE_TYPES: BarcodeType[] = [
@@ -27,17 +27,20 @@ const SUPPORTED_BARCODE_TYPES: BarcodeType[] = [
   "code39",
   "code93",
 ];
-
-const COOLDOWN_MS = 2000;
-const ALREADY_SCANNED_INDICATOR_MS = 1800;
+const LIVE_SCAN_COOLDOWN_MS = 1200;
+const LIVE_SAVED_OVERLAY_TTL_MS = 1200;
 
 export type ScannedBarcode = {
   data: string;
   type: string;
 };
 
-type AlreadyScannedIndicator = {
-  data: string;
+type LiveDetectedBarcode = ScannedBarcode & {
+  selected: boolean;
+};
+
+type LiveSavedOverlay = {
+  id: string;
   bounds: BarcodeBounds;
 };
 
@@ -45,87 +48,92 @@ type MultiBarcodeScannerProps = {
   onClose: () => void;
 };
 
-function isValidBounds(bounds: BarcodeBounds): boolean {
-  const { origin, size } = bounds;
-  return (
-    size != null &&
-    typeof size.width === "number" &&
-    typeof size.height === "number" &&
-    size.width > 0 &&
-    size.height > 0 &&
-    origin != null &&
-    typeof origin.x === "number" &&
-    typeof origin.y === "number"
-  );
-}
-
 export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
   const [permission, requestPermission] = useCameraPermissions();
   const [scannedBarcodes, setScannedBarcodes] = useState<ScannedBarcode[]>([]);
-  const [alreadyScannedIndicator, setAlreadyScannedIndicator] =
-    useState<AlreadyScannedIndicator | null>(null);
-  const lastScannedRef = useRef<Record<string, number>>({});
-  const scannedBarcodesRef = useRef<ScannedBarcode[]>([]);
-  const indicatorTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  scannedBarcodesRef.current = scannedBarcodes;
-
-  const clearIndicator = useCallback(() => {
-    if (indicatorTimeoutRef.current) {
-      clearTimeout(indicatorTimeoutRef.current);
-      indicatorTimeoutRef.current = null;
-    }
-    setAlreadyScannedIndicator(null);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (indicatorTimeoutRef.current) clearTimeout(indicatorTimeoutRef.current);
-    };
-  }, []);
-
-  const handleBarcodeScanned = useCallback(
-    (result: BarcodeScanningResult) => {
-      const { data, type, bounds } = result;
-
-      const isAlreadyScanned = scannedBarcodesRef.current.some(
-        (b) => b.data === data
-      );
-      if (isAlreadyScanned) {
-        clearIndicator();
-        if (indicatorTimeoutRef.current) clearTimeout(indicatorTimeoutRef.current);
-        setAlreadyScannedIndicator({ data, bounds });
-        indicatorTimeoutRef.current = setTimeout(() => {
-          indicatorTimeoutRef.current = null;
-          setAlreadyScannedIndicator(null);
-        }, ALREADY_SCANNED_INDICATOR_MS);
-        return;
-      }
-
-      const now = Date.now();
-      const last = lastScannedRef.current[data] ?? 0;
-      if (now - last < COOLDOWN_MS) return;
-      lastScannedRef.current[data] = now;
-      clearIndicator();
-
-      setScannedBarcodes((prev) => {
-        if (prev.some((b) => b.data === data)) return prev;
-        return [...prev, { data, type }];
-      });
-    },
-    [clearIndicator]
+  const [liveDetectedBarcodes, setLiveDetectedBarcodes] = useState<LiveDetectedBarcode[]>(
+    []
   );
+  const [liveSavedOverlays, setLiveSavedOverlays] = useState<LiveSavedOverlay[]>([]);
+  const [isDetectedPanelCollapsed, setIsDetectedPanelCollapsed] = useState(true);
+  const scannedBarcodesRef = useRef<ScannedBarcode[]>([]);
+  const lastLiveScanAtRef = useRef<Record<string, number>>({});
+  scannedBarcodesRef.current = scannedBarcodes;
 
   const clearList = useCallback(() => {
     setScannedBarcodes([]);
-    lastScannedRef.current = {};
-    clearIndicator();
-  }, [clearIndicator]);
+  }, []);
+
+  const isValidBounds = useCallback((bounds: BarcodeBounds): boolean => {
+    const { origin, size } = bounds;
+    return (
+      size != null &&
+      typeof size.width === "number" &&
+      typeof size.height === "number" &&
+      size.width > 0 &&
+      size.height > 0 &&
+      origin != null &&
+      typeof origin.x === "number" &&
+      typeof origin.y === "number"
+    );
+  }, []);
+
+  const handleLiveBarcodeScanned = useCallback(
+    (result: BarcodeScanningResult) => {
+      const { data, type, bounds } = result;
+      const now = Date.now();
+      const last = lastLiveScanAtRef.current[data] ?? 0;
+      if (now - last < LIVE_SCAN_COOLDOWN_MS) return;
+      lastLiveScanAtRef.current[data] = now;
+      const alreadySaved = scannedBarcodesRef.current.some((b) => b.data === data);
+      if (alreadySaved && isValidBounds(bounds)) {
+        const overlayId = `${data}-${now}`;
+        setLiveSavedOverlays((prev) => {
+          const withoutSameData = prev.filter((o) => !o.id.startsWith(`${data}-`));
+          return [...withoutSameData, { id: overlayId, bounds }];
+        });
+        setTimeout(() => {
+          setLiveSavedOverlays((prev) => prev.filter((o) => o.id !== overlayId));
+        }, LIVE_SAVED_OVERLAY_TTL_MS);
+      }
+      setLiveDetectedBarcodes((prev) => {
+        if (prev.some((b) => b.data === data)) return prev;
+        return [...prev, { data, type, selected: true }];
+      });
+    },
+    [isValidBounds]
+  );
+
+  const handleSaveDetected = useCallback(() => {
+    const existing = new Set(scannedBarcodesRef.current.map((b) => b.data));
+    const toAdd = liveDetectedBarcodes
+      .filter((b) => b.selected && !existing.has(b.data))
+      .map((b) => ({ data: b.data, type: b.type }));
+    if (toAdd.length > 0) {
+      setScannedBarcodes((prev) => [...prev, ...toAdd]);
+    }
+  }, [liveDetectedBarcodes]);
+
+  const clearDetected = useCallback(() => {
+    setLiveDetectedBarcodes([]);
+    setLiveSavedOverlays([]);
+    lastLiveScanAtRef.current = {};
+  }, []);
+
+  const toggleDetectedSelection = useCallback((data: string) => {
+    const isAlreadySaved = scannedBarcodesRef.current.some((b) => b.data === data);
+    if (isAlreadySaved) return;
+    setLiveDetectedBarcodes((prev) =>
+      prev.map((b) => (b.data === data ? { ...b, selected: !b.selected } : b))
+    );
+  }, []);
 
   if (!permission) {
     return (
       <View className="flex-1 bg-slate-900 justify-center items-center p-6">
-        <Text className="text-white text-center">Checking camera permission…</Text>
+        <Text className="text-white text-center">
+          Checking camera permission…
+        </Text>
       </View>
     );
   }
@@ -142,10 +150,7 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
         >
           <Text className="text-white font-medium">Grant camera access</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          className="mt-4 py-2"
-          onPress={onClose}
-        >
+        <TouchableOpacity className="mt-4 py-2" onPress={onClose}>
           <Text className="text-slate-400">Cancel</Text>
         </TouchableOpacity>
       </View>
@@ -153,9 +158,7 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
   }
 
   const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
-  const showBoundsIndicator =
-    alreadyScannedIndicator &&
-    isValidBounds(alreadyScannedIndicator.bounds);
+  const expandedPanelHeight = Math.round(screenHeight * 0.75);
 
   const cameraStyle =
     Platform.OS === "ios"
@@ -172,6 +175,9 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
     Platform.OS === "ios"
       ? [styles.container, { width: screenWidth, height: screenHeight }]
       : styles.container;
+  const hasNewDetectedToSave = liveDetectedBarcodes.some(
+    (b) => b.selected && !scannedBarcodesRef.current.some((s) => s.data === b.data)
+  );
 
   return (
     <View style={containerStyle}>
@@ -180,60 +186,25 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
           style={cameraStyle}
           facing="back"
           barcodeScannerSettings={{ barcodeTypes: SUPPORTED_BARCODE_TYPES }}
-          onBarcodeScanned={handleBarcodeScanned}
+          onBarcodeScanned={handleLiveBarcodeScanned}
         />
+        {liveSavedOverlays.map((overlay) => (
+          <View
+            key={overlay.id}
+            pointerEvents="none"
+            style={[
+              styles.liveSavedBoundsOverlay,
+              {
+                left: overlay.bounds.origin.x,
+                top: overlay.bounds.origin.y,
+                width: overlay.bounds.size.width,
+                height: overlay.bounds.size.height,
+              },
+            ]}
+          />
+        ))}
       </View>
       <View style={styles.overlay} pointerEvents="box-none">
-        {alreadyScannedIndicator && (
-          <>
-            {showBoundsIndicator ? (
-              <View
-                style={[
-                  styles.alreadyScannedBadge,
-                  {
-                    position: "absolute",
-                    left: alreadyScannedIndicator.bounds.origin.x,
-                    top: alreadyScannedIndicator.bounds.origin.y,
-                    width: Math.max(
-                      alreadyScannedIndicator.bounds.size.width,
-                      80
-                    ),
-                    minHeight: Math.max(
-                      alreadyScannedIndicator.bounds.size.height,
-                      28
-                    ),
-                  },
-                ]}
-                pointerEvents="none"
-              >
-                <Text
-                  className="text-white font-semibold text-xs"
-                  numberOfLines={1}
-                >
-                  ✓ Already scanned
-                </Text>
-              </View>
-            ) : (
-              <View
-                style={[
-                  styles.alreadyScannedBanner,
-                  {
-                    position: "absolute",
-                    left: 24,
-                    right: 24,
-                    top: screenHeight * 0.4,
-                  },
-                ]}
-                pointerEvents="none"
-              >
-                <Text className="text-white font-semibold">
-                  ✓ Already scanned
-                </Text>
-              </View>
-            )}
-          </>
-        )}
-
         <View className="flex-row justify-between items-center pt-12 px-4">
           <TouchableOpacity
             className="bg-white/20 rounded-xl py-2.5 px-4"
@@ -250,40 +221,104 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
         </View>
 
         <View style={styles.bottomPanel}>
-          <View className="bg-black/70 rounded-2xl mx-4 max-h-56">
-            <Text className="text-white font-semibold px-4 pt-3 pb-2">
-              Scanned ({scannedBarcodes.length})
-            </Text>
-            <ScrollView
-              style={styles.scroll}
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
+          <View style={styles.panelToggleRow}>
+            <TouchableOpacity
+              style={styles.panelToggleButton}
+              onPress={() =>
+                setIsDetectedPanelCollapsed((collapsed) => !collapsed)
+              }
             >
-              {scannedBarcodes.length === 0 ? (
-                <Text className="text-slate-400 px-4 pb-3 text-sm">
-                  Point the camera at barcodes or QR codes. New codes are added automatically.
-                </Text>
-              ) : (
-                scannedBarcodes.map((b, i) => (
-                  <View
-                    key={`${b.data}-${i}`}
-                    className="border-b border-slate-600/50 px-4 py-2.5"
-                  >
-                    <Text className="text-slate-300 text-xs uppercase">
-                      {b.type}
-                    </Text>
-                    <Text
-                      className="text-white text-sm"
-                      numberOfLines={2}
-                      ellipsizeMode="tail"
-                    >
-                      {b.data}
-                    </Text>
-                  </View>
-                ))
-              )}
-            </ScrollView>
+              <View style={styles.panelHandle} />
+              <Text style={styles.panelToggleText}>
+                {isDetectedPanelCollapsed
+                  ? `Detected (${liveDetectedBarcodes.length})`
+                  : "Hide detected"}
+              </Text>
+            </TouchableOpacity>
           </View>
+          {!isDetectedPanelCollapsed ? (
+            <View
+              style={[
+                styles.detectedPanelExpanded,
+                {
+                  height: expandedPanelHeight,
+                  maxHeight: expandedPanelHeight,
+                },
+              ]}
+            >
+              <View className="flex-row items-center justify-between px-4 pt-3 pb-2">
+                <Text className="text-white font-semibold">Detected barcodes</Text>
+                <TouchableOpacity onPress={clearDetected}>
+                  <Text className="text-slate-300 text-xs">Clear</Text>
+                </TouchableOpacity>
+              </View>
+              <ScrollView
+                style={styles.detectedListScroll}
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {liveDetectedBarcodes.length === 0 ? (
+                  <Text className="text-slate-400 px-4 pb-3 text-sm">
+                    Aim the camera at labels. We will list each barcode once.
+                  </Text>
+                ) : (
+                  liveDetectedBarcodes.map((b, i) => {
+                    const alreadySaved = scannedBarcodesRef.current.some(
+                      (saved) => saved.data === b.data
+                    );
+                    return (
+                    <View
+                      key={`${b.data}-${i}`}
+                      className="border-b border-slate-600/50 px-4 py-2 flex-row items-center"
+                    >
+                      <TouchableOpacity
+                        onPress={() => toggleDetectedSelection(b.data)}
+                        disabled={alreadySaved}
+                        style={[
+                          styles.checkboxIndicator,
+                          alreadySaved || b.selected
+                            ? styles.checkboxIndicatorChecked
+                            : null,
+                        ]}
+                      >
+                        {alreadySaved || b.selected ? (
+                          <Text style={styles.checkboxIndicatorCheckText}>✓</Text>
+                        ) : null}
+                      </TouchableOpacity>
+                      <View className="flex-1 ml-3">
+                        <Text className="text-slate-300 text-xs uppercase">
+                          {b.type}
+                        </Text>
+                        <Text
+                          className="text-white text-sm"
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
+                          {b.data}
+                        </Text>
+                      </View>
+                      {alreadySaved ? (
+                        <View style={styles.savedBadge}>
+                          <Text style={styles.savedBadgeText}>Saved</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    );
+                  })
+                )}
+              </ScrollView>
+              <TouchableOpacity
+                style={[
+                  styles.saveDetectedButton,
+                  !hasNewDetectedToSave ? styles.saveButtonDisabled : null,
+                ]}
+                onPress={handleSaveDetected}
+                disabled={!hasNewDetectedToSave}
+              >
+                <Text className="text-white text-center font-medium">Save new</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
         </View>
       </View>
     </View>
@@ -297,6 +332,7 @@ const styles = StyleSheet.create({
   },
   cameraWrapper: {
     ...StyleSheet.absoluteFillObject,
+    position: "relative",
   },
   camera: {
     ...StyleSheet.absoluteFillObject,
@@ -309,23 +345,92 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingBottom: 24,
+    paddingBottom: 16,
   },
-  scroll: { maxHeight: 200 },
-  scrollContent: { paddingBottom: 16 },
-  alreadyScannedBadge: {
-    backgroundColor: "rgba(34, 197, 94, 0.9)",
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    justifyContent: "center",
-    alignItems: "center",
+  detectedPanelExpanded: {
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 16,
+    backgroundColor: "rgba(0,0,0,0.75)",
   },
-  alreadyScannedBanner: {
-    backgroundColor: "rgba(34, 197, 94, 0.9)",
+  detectedListScroll: {
+    flex: 1,
+  },
+  saveDetectedButton: {
+    marginHorizontal: 16,
+    marginBottom: 12,
+    marginTop: 10,
+    backgroundColor: "#059669",
     borderRadius: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    alignSelf: "center",
+    paddingVertical: 10,
+  },
+  scrollContent: { paddingBottom: 16 },
+  saveButtonDisabled: {
+    opacity: 0.5,
+  },
+  panelToggleRow: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 6,
+  },
+  panelToggleButton: {
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: "rgba(0,0,0,0.55)",
+  },
+  panelHandle: {
+    width: 42,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.7)",
+    marginBottom: 4,
+  },
+  panelToggleText: {
+    color: "rgba(255,255,255,0.9)",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  checkboxIndicator: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.7)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  checkboxIndicatorChecked: {
+    backgroundColor: "rgba(34, 197, 94, 0.95)",
+    borderColor: "rgba(34, 197, 94, 0.95)",
+  },
+  liveSavedBoundsOverlay: {
+    position: "absolute",
+    borderWidth: 2,
+    borderColor: "rgba(34, 197, 94, 0.95)",
+    borderRadius: 6,
+    backgroundColor: "rgba(34, 197, 94, 0.12)",
+  },
+  checkboxIndicatorCheckText: {
+    color: "#fff",
+    fontWeight: "700",
+    fontSize: 12,
+    lineHeight: 14,
+  },
+  savedBadge: {
+    backgroundColor: "rgba(16, 185, 129, 0.22)",
+    borderWidth: 1,
+    borderColor: "rgba(16, 185, 129, 0.65)",
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginLeft: 8,
+  },
+  savedBadgeText: {
+    color: "#A7F3D0",
+    fontSize: 11,
+    fontWeight: "600",
   },
 });
