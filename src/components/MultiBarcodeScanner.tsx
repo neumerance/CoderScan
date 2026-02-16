@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import type { GestureResponderEvent } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import type { BarcodeScanningResult, BarcodeType } from "expo-camera";
 
@@ -24,6 +25,17 @@ const SUPPORTED_BARCODE_TYPES: BarcodeType[] = [
   "code93",
 ];
 const LIVE_SCAN_COOLDOWN_MS = 1200;
+const MIN_ZOOM = 0;
+const MAX_ZOOM = 1;
+
+function distance(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number
+): number {
+  return Math.hypot(x2 - x1, y2 - y1);
+}
 
 export type ScannedBarcode = {
   data: string;
@@ -45,8 +57,12 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
     []
   );
   const [isDetectedPanelCollapsed, setIsDetectedPanelCollapsed] = useState(true);
+  const [zoom, setZoom] = useState(0);
   const scannedBarcodesRef = useRef<ScannedBarcode[]>([]);
   const lastLiveScanAtRef = useRef<Record<string, number>>({});
+  const pinchRef = useRef<{ initialDistance: number; startZoom: number } | null>(null);
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
   scannedBarcodesRef.current = scannedBarcodes;
 
   const clearList = useCallback(() => {
@@ -90,6 +106,55 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
       prev.map((b) => (b.data === data ? { ...b, selected: !b.selected } : b))
     );
   }, []);
+
+  const handleTouchStart = useCallback(
+    (evt: GestureResponderEvent) => {
+      const touches = evt.nativeEvent.touches;
+      if (touches.length >= 2) {
+        const d = distance(
+          touches[0].pageX,
+          touches[0].pageY,
+          touches[1].pageX,
+          touches[1].pageY
+        );
+        pinchRef.current = { initialDistance: d, startZoom: zoomRef.current };
+      }
+    },
+    []
+  );
+
+  const handleTouchMove = useCallback(
+    (evt: GestureResponderEvent) => {
+      const touches = evt.nativeEvent.touches;
+      const pinch = pinchRef.current;
+      if (pinch && touches.length >= 2) {
+        const d = distance(
+          touches[0].pageX,
+          touches[0].pageY,
+          touches[1].pageX,
+          touches[1].pageY
+        );
+        if (pinch.initialDistance > 0) {
+          const zoomDelta = (d - pinch.initialDistance) / 280;
+          const next = Math.max(
+            MIN_ZOOM,
+            Math.min(MAX_ZOOM, pinch.startZoom + zoomDelta)
+          );
+          setZoom(next);
+        }
+      }
+    },
+    []
+  );
+
+  const handleTouchEnd = useCallback(
+    (evt: GestureResponderEvent) => {
+      if (evt.nativeEvent.touches.length < 2) {
+        pinchRef.current = null;
+      }
+    },
+    []
+  );
 
   if (!permission) {
     return (
@@ -144,10 +209,16 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
 
   return (
     <View style={containerStyle}>
-      <View style={styles.cameraWrapper}>
+      <View
+        style={styles.cameraWrapper}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
         <CameraView
           style={cameraStyle}
           facing="back"
+          zoom={zoom}
           barcodeScannerSettings={{ barcodeTypes: SUPPORTED_BARCODE_TYPES }}
           onBarcodeScanned={handleLiveBarcodeScanned}
         />
