@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { normalizeText } from "../utils/ocr";
+import { normalizeText, type TextBounds } from "../utils/ocr";
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
 const EXPANDED_HEIGHT = SCREEN_HEIGHT * 0.75;
@@ -17,6 +17,7 @@ const EXPANDED_HEIGHT = SCREEN_HEIGHT * 0.75;
 export type OcrEntry = {
   text: string;
   selected: boolean;
+  bounds?: TextBounds;
 };
 
 type DetectedCollapsibleProps = {
@@ -171,11 +172,7 @@ export function DetectedCollapsible({
           activeOpacity={1}
           onPress={() => setEditing(null)}
         >
-          <TouchableOpacity
-            style={styles.editModalContent}
-            activeOpacity={1}
-            onPress={() => {}}
-          >
+          <View style={styles.editModalContent}>
             <Text style={styles.editModalTitle}>Edit text</Text>
             <TextInput
               style={styles.editModalInput}
@@ -207,7 +204,7 @@ export function DetectedCollapsible({
                 <Text style={styles.editModalButtonSaveText}>Save</Text>
               </TouchableOpacity>
             </View>
-          </TouchableOpacity>
+          </View>
         </TouchableOpacity>
       </Modal>
     </View>

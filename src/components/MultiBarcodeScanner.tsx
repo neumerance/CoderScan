@@ -10,7 +10,7 @@ import {
 import type { GestureResponderEvent } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { extractTextFromImage, isSupported as isOcrSupported } from "expo-text-extractor";
-import { normalizeText } from "../utils/ocr";
+import { extractTextWithBounds, normalizeText } from "../utils/ocr";
 import { AnalyzeScreen } from "./AnalyzeScreen";
 import { CameraScreen } from "./CameraScreen";
 import { DetectedCollapsible, type OcrEntry } from "./DetectedCollapsible";
@@ -127,29 +127,35 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
     setIsAnalyzing(true);
     setAnalysisError(null);
     try {
-      const lines = await extractTextFromImage(capturedUri);
+      const withBounds = await extractTextWithBounds(capturedUri);
       const existingDetected = new Set(detectedTexts.map((entry) => normalizeText(entry.text)));
       const existingSaved = new Set(savedTexts.map((text) => normalizeText(text)));
       const additions: OcrEntry[] = [];
 
-      for (const raw of lines) {
-        const text = raw.trim();
-        const normalized = normalizeText(text);
-        
-        // Skip empty, too short, or common header/label text
-        if (!text || normalized.length < 3) continue;
+      const processLine = (text: string, bounds?: { x: number; y: number; width: number; height: number }) => {
+        const trimmed = text.trim();
+        const normalized = normalizeText(trimmed);
+        if (!trimmed || normalized.length < 3) return;
         if (
           normalized === "no" ||
           normalized === "serialnumber" ||
           normalized.includes("serial") ||
-          text.toLowerCase().includes("number")
-        ) continue;
-        
-        // Skip if already detected or saved
-        if (existingDetected.has(normalized) || existingSaved.has(normalized)) continue;
-        if (additions.some((entry) => normalizeText(entry.text) === normalized)) continue;
-        
-        additions.push({ text, selected: true });
+          trimmed.toLowerCase().includes("number")
+        ) return;
+        if (existingDetected.has(normalized) || existingSaved.has(normalized)) return;
+        if (additions.some((entry) => normalizeText(entry.text) === normalized)) return;
+        additions.push({ text: trimmed, selected: true, bounds });
+      };
+
+      if (withBounds && withBounds.length > 0) {
+        for (const item of withBounds) {
+          processLine(item.text, item.bounds);
+        }
+      } else {
+        const lines = await extractTextFromImage(capturedUri);
+        for (const raw of lines) {
+          processLine(raw);
+        }
       }
 
       if (additions.length === 0) {
@@ -273,7 +279,10 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
           onTouchEnd={handleTouchEnd}
         />
       ) : (
-        <AnalyzeScreen capturedUri={capturedUri} />
+        <AnalyzeScreen
+          capturedUri={capturedUri}
+          detectedEntries={detectedTexts}
+        />
       )}
 
       <View style={styles.overlay} pointerEvents="box-none">
