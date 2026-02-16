@@ -1,89 +1,241 @@
-# CodeScan – React Native Boilerplate
+# CodeScan
 
-Expo React Native app with **Tailwind (NativeWind)**, **camera permission**, and **file/photo library permission** preconfigured.
+A React Native (Expo) app that captures a photo and uses **on-device OCR** to extract and collect text—ideal for serial numbers, codes, or any printed text you want to capture in bulk without typing.
 
-## Stack
+---
 
-- **Expo SDK 54** – React Native tooling and runtime (compatible with Expo Go on device)
-- **NativeWind v4** – Tailwind CSS for React Native (utility classes like `className="flex-1 bg-slate-100"`)
-- **expo-camera** – Camera access and permission (plugin in `app.json`)
-- **expo-media-library** – Photo library / file manager access (plugin in `app.json`)
-- **expo-text-extractor** – On-device OCR (Google ML Kit / Apple Vision) for reading text near barcodes
+## What is this app for?
+
+CodeScan lets you:
+
+1. **Take a photo** of a document, label sheet, or list (e.g. serial numbers under barcodes).
+2. **Run OCR** on the image to detect text.
+3. **Review and select** which detected lines to keep (with optional bounding boxes on the image).
+4. **Save** selected items into a list and **reanalyze** or **retake** as needed.
+
+Use it when you need to quickly digitize printed text (inventory codes, serial numbers, part numbers, etc.) without manual entry. All processing runs on the device; no image is sent to a server.
+
+---
+
+## Why use it?
+
+| Need | How CodeScan helps |
+|------|---------------------|
+| Capture many codes from a printed list | One photo → OCR extracts text → select and save in one session |
+| Avoid retyping serial numbers | Point the camera, tap Analyze, then Save the lines you need |
+| Keep data on device | OCR runs locally (ML Kit / Vision); no cloud upload required |
+| Correct or trim bad reads | Edit any detected line (long-press), or clear and reanalyze |
+
+---
+
+## How it works
+
+High-level flow:
+
+```mermaid
+flowchart LR
+  subgraph Capture
+    A[Camera] --> B[Take photo]
+  end
+  subgraph Analyze
+    B --> C[Analyze screen]
+    C --> D[Tap Analyze]
+    D --> E[OCR on device]
+    E --> F[Detected list + boxes]
+  end
+  subgraph Manage
+    F --> G[Select / Edit / Save]
+    G --> H[Reanalyze or Retake]
+    H --> A
+  end
+```
+
+**Screen flow:**
+
+```mermaid
+stateDiagram-v2
+  [*] --> Home
+  Home --> Camera: Open scanner
+  Camera --> Analyze: Capture photo
+  Analyze --> Camera: Retake
+  Analyze --> Analyze: Analyze (OCR)
+  Analyze --> Results: Analysis done
+  Results --> Analyze: Reanalyze
+  Results --> Camera: Retake
+  Results --> Home: Close
+  Camera --> Home: Close
+```
+
+**Tech flow:**
+
+- **Camera** → `expo-camera` captures a photo.
+- **Analyze screen** → Shows the image; you tap **Analyze**.
+- **OCR** → `expo-text-extractor` (Apple Vision on iOS, ML Kit on Android) returns text (and optional bounding boxes).
+- **Filtering** → Short lines and common labels (e.g. “No.”, “Serial Number”) are skipped so the list focuses on actual codes.
+- **Deduplication** → Normalized text is compared so the same value isn’t added twice.
+- **List** → Detected lines appear in a bottom collapsible; you can select/deselect, edit (long-press), Save, Clear, or Reanalyze.
+
+---
+
+## Architecture (simplified)
+
+```mermaid
+flowchart TB
+  subgraph App
+    AppTsx[App.tsx]
+    Multi[MultiBarcodeScanner]
+    Camera[CameraScreen]
+    Analyze[AnalyzeScreen]
+    Collapse[DetectedCollapsible]
+  end
+
+  subgraph Utils
+    OCR[ocr.ts: normalizeText, extractTextWithBounds]
+  end
+
+  subgraph Native
+    Extractor[expo-text-extractor]
+  end
+
+  AppTsx --> Multi
+  Multi --> Camera
+  Multi --> Analyze
+  Multi --> Collapse
+  Multi --> OCR
+  OCR --> Extractor
+  Analyze --> Image[Image + overlay]
+```
+
+- **MultiBarcodeScanner** – Orchestrates mode (camera vs analyze), capture, analyze, and list state.
+- **CameraScreen** – Camera view and pinch-to-zoom.
+- **AnalyzeScreen** – Shows captured image, Analyze/Retake, and bounding box overlay when bounds are available.
+- **DetectedCollapsible** – Bottom sheet with detected list, selection, Save, Reanalyze, and long-press edit.
+- **ocr.ts** – Text normalization and optional `extractTextWithBounds()` (uses native API when present).
+
+---
 
 ## Setup
 
-1. **Use Node 20.19.4+** (required for SDK 54). If you use `asdf`: `asdf set nodejs 20.19.4` (or add a `.tool-versions` with `nodejs 20.19.4`).
+### Prerequisites
 
-2. **Install dependencies**:
+- **Node.js** 20.19.4+ (e.g. `asdf set nodejs 20.19.4` or `.tool-versions` with `nodejs 20.19.4`).
+- **iOS**: Xcode and CocoaPods (for `expo run:ios`).
+- **Android**: Android Studio (or CLI tools) and `ANDROID_HOME` set (e.g. `~/Library/Android/sdk` on macOS).
 
-   ```bash
-   npm install --legacy-peer-deps
-   ```
+### 1. Clone and install
 
-   Use `--legacy-peer-deps` if you see peer dependency conflicts; the project is aligned to Expo SDK 54.
+```bash
+git clone <repo-url>
+cd coderscan
+npm install --legacy-peer-deps
+```
 
-3. **Start the app**:
+Use `--legacy-peer-deps` if you hit peer dependency warnings with Expo SDK 54.
 
-   ```bash
-   npx expo start
-   ```
+### 2. Run with development client (recommended for OCR)
 
-   Then run on iOS simulator, Android emulator, or a physical device (Expo Go).
+OCR uses native modules and **does not run in Expo Go**. Use a custom dev client:
 
-## OCR + Dev Client
+**iOS:**
 
-OCR requires native code, so it does **not** run in Expo Go. Use a custom dev client instead:
+```bash
+npx expo run:ios
+```
 
-1. Build and install a development client:
+**Android:**
 
-   ```bash
-   npx expo run:ios
-   # or
-   npx expo run:android
-   ```
+```bash
+npx expo run:android
+```
 
-2. Start Metro for dev client:
+Then start Metro for the dev client:
 
-   ```bash
-   npx expo start --dev-client
-   ```
+```bash
+npx expo start --dev-client
+```
 
-3. Open the installed development client app on your device/simulator and connect to this project.
+Open the **CodeScan** dev client on the device/simulator; it will connect to this project.
 
-## Running on Android
+### 3. (Optional) Run in Expo Go
 
-If you see **"Failed to resolve the Android SDK path"**, the Android SDK is not installed or not on your path.
+```bash
+npx expo start
+```
 
-1. **Install Android Studio** (or the [command-line tools only](https://developer.android.com/studio#command-tools)) and install the Android SDK via the SDK Manager.
-2. **Set `ANDROID_HOME`** to your SDK path (often the default is `~/Library/Android/sdk` on macOS after Android Studio install):
+Then scan the QR code with Expo Go. **OCR and bounding boxes will not work** in Expo Go; you’ll need the dev client for full functionality.
+
+---
+
+## Android SDK (if needed)
+
+If you see **"Failed to resolve the Android SDK path"**:
+
+1. Install [Android Studio](https://developer.android.com/studio) (or [command-line tools](https://developer.android.com/studio#command-tools)) and install the Android SDK.
+2. Set `ANDROID_HOME` and add tools to `PATH`:
 
    ```bash
    export ANDROID_HOME=$HOME/Library/Android/sdk
    export PATH=$PATH:$ANDROID_HOME/emulator:$ANDROID_HOME/platform-tools
    ```
 
-   Add these to your `~/.zshrc` (or `~/.bash_profile`) to make them permanent.
+   Add these to `~/.zshrc` or `~/.bash_profile` to make them permanent.
 
-You can ignore this message if you only plan to run on **iOS** or **Expo Go** on a device.
+---
 
-## Permissions
+## Stack
 
-- **Camera**: Declared via `expo-camera` plugin in `app.json` (`cameraPermission`, `microphonePermission`). Request at runtime with `useCameraPermissions()` from `expo-camera`.
-- **File / photo library**: Declared via `expo-media-library` plugin in `app.json` (`photosPermission`, `savePhotosPermission`, `granularPermissions`). Request at runtime with `MediaLibrary.usePermissions()` from `expo-media-library`.
+| Dependency | Purpose |
+|------------|--------|
+| **Expo SDK 54** | React Native tooling and runtime |
+| **expo-camera** | Camera access and capture |
+| **expo-text-extractor** | On-device OCR (Apple Vision / ML Kit) |
+| **expo-dev-client** | Custom dev build for native OCR |
+| **NativeWind v4** | Tailwind-style styling (`className`) |
+| **expo-media-library** | Photo library permission (used from home screen) |
 
-The app includes a simple UI to request both permissions and open the camera.
-
-## Optional: app icon and splash
-
-To add a custom icon and splash screen, add these to `app.json` and place the files under `assets/`:
-
-- `assets/icon.png` (e.g. 1024×1024)
-- `assets/splash-icon.png`
-- `assets/adaptive-icon.png` (Android)
+---
 
 ## Scripts
 
-- `npm start` – Start Expo dev server
-- `npm run android` – Run on Android
-- `npm run ios` – Run on iOS
-- `npm run web` – Run in web browser (limited native API support)
+| Command | Description |
+|---------|-------------|
+| `npm start` | Start Expo dev server |
+| `npm run ios` | Build and run on iOS (dev client) |
+| `npm run android` | Build and run on Android (dev client) |
+| `npm run web` | Run in browser (limited; no OCR) |
+
+---
+
+## Permissions
+
+- **Camera** – Requested when you open the scanner; configured in `app.json` via the `expo-camera` plugin.
+- **Photo library** – Requested from the home screen; configured via the `expo-media-library` plugin.
+
+If access was denied, the app can prompt to open **Settings** so the user can enable the permission.
+
+---
+
+## Optional: Bounding box patch (expo-text-extractor)
+
+The repo includes logic to show **bounding boxes** around detected text. Full support requires a native extension that returns bounds from OCR. If you’ve added that in a fork or patch of `expo-text-extractor`:
+
+1. Install patch-package (if not already):  
+   `npm i -D patch-package`
+2. Add to `package.json` scripts:  
+   `"postinstall": "patch-package"`
+3. After editing `node_modules/expo-text-extractor`, save the patch:  
+   `npx patch-package expo-text-extractor`
+
+Without the bounds API, the app still works; only the on-image boxes are skipped.
+
+---
+
+## Optional: App icon and splash
+
+To set a custom icon and splash in Expo:
+
+1. Add under `assets/`:
+   - `icon.png` (e.g. 1024×1024)
+   - `splash-icon.png`
+   - `adaptive-icon.png` (Android)
+2. Reference them in `app.json` (see [Expo config](https://docs.expo.dev/develop/user-interface/splash-screen-and-app-icon/)).
