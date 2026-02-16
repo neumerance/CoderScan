@@ -1,4 +1,14 @@
-import { Dimensions, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useState } from "react";
+import {
+  Dimensions,
+  Modal,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { normalizeText } from "../utils/ocr";
 
 const SCREEN_HEIGHT = Dimensions.get("window").height;
@@ -18,6 +28,7 @@ type DetectedCollapsibleProps = {
   onSave: () => void;
   onClear: () => void;
   onReanalyze: () => void;
+  onEditText: (oldText: string, newText: string) => void;
   hasNewToSave: boolean;
   emptyMessage?: string;
 };
@@ -31,9 +42,12 @@ export function DetectedCollapsible({
   onSave,
   onClear,
   onReanalyze,
+  onEditText,
   hasNewToSave,
   emptyMessage = "Snap and analyze a photo to extract text.",
 }: DetectedCollapsibleProps) {
+  const [editing, setEditing] = useState<{ oldText: string; draftText: string } | null>(null);
+
   const selectedCount = entries.filter((entry) => {
     const alreadySaved = savedTexts.some(
       (saved) => normalizeText(saved) === normalizeText(entry.text)
@@ -95,7 +109,15 @@ export function DetectedCollapsible({
                         <Text style={styles.checkboxIndicatorCheckText}>✓</Text>
                       ) : null}
                     </TouchableOpacity>
-                    <View className="flex-1 ml-3">
+                    <TouchableOpacity
+                      className="flex-1 ml-3"
+                      onPress={() => onToggleSelection(entry.text)}
+                      onLongPress={() => {
+                        if (!alreadySaved) setEditing({ oldText: entry.text, draftText: entry.text });
+                      }}
+                      disabled={alreadySaved}
+                      activeOpacity={0.7}
+                    >
                       <Text
                         className="text-white text-sm"
                         numberOfLines={1}
@@ -103,7 +125,7 @@ export function DetectedCollapsible({
                       >
                         {entry.text}
                       </Text>
-                    </View>
+                    </TouchableOpacity>
                     {alreadySaved ? (
                       <View style={styles.savedBadge}>
                         <Text style={styles.savedBadgeText}>Saved</Text>
@@ -137,6 +159,57 @@ export function DetectedCollapsible({
           </TouchableOpacity>
         </View>
       ) : null}
+
+      <Modal
+        visible={editing !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditing(null)}
+      >
+        <TouchableOpacity
+          style={styles.editModalOverlay}
+          activeOpacity={1}
+          onPress={() => setEditing(null)}
+        >
+          <TouchableOpacity
+            style={styles.editModalContent}
+            activeOpacity={1}
+            onPress={() => {}}
+          >
+            <Text style={styles.editModalTitle}>Edit text</Text>
+            <TextInput
+              style={styles.editModalInput}
+              value={editing?.draftText ?? ""}
+              onChangeText={(draftText) =>
+                setEditing((prev) => (prev ? { ...prev, draftText } : null))
+              }
+              placeholder="Enter text"
+              placeholderTextColor="rgba(255,255,255,0.4)"
+              autoFocus
+              multiline
+            />
+            <View style={styles.editModalButtons}>
+              <TouchableOpacity
+                style={styles.editModalButtonCancel}
+                onPress={() => setEditing(null)}
+              >
+                <Text style={styles.editModalButtonCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.editModalButtonSave}
+                onPress={() => {
+                  if (editing && editing.draftText.trim()) {
+                    onEditText(editing.oldText, editing.draftText.trim());
+                    setEditing(null);
+                  }
+                }}
+              >
+                <Text style={styles.editModalButtonSaveText}>Save</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
     </View>
   );
 }
@@ -250,6 +323,62 @@ const styles = StyleSheet.create({
   savedBadgeText: {
     color: "#A7F3D0",
     fontSize: 11,
+    fontWeight: "600",
+  },
+  editModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
+  },
+  editModalContent: {
+    width: "100%",
+    maxWidth: 400,
+    backgroundColor: "rgba(30,41,59,0.98)",
+    borderRadius: 16,
+    padding: 20,
+  },
+  editModalTitle: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+    marginBottom: 12,
+  },
+  editModalInput: {
+    backgroundColor: "rgba(255,255,255,0.1)",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: "#fff",
+    fontSize: 14,
+    minHeight: 80,
+    textAlignVertical: "top",
+  },
+  editModalButtons: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 12,
+    marginTop: 16,
+  },
+  editModalButtonCancel: {
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+  },
+  editModalButtonCancelText: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  editModalButtonSave: {
+    backgroundColor: "#059669",
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+  },
+  editModalButtonSaveText: {
+    color: "#fff",
+    fontSize: 14,
     fontWeight: "600",
   },
 });

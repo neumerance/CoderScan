@@ -208,6 +208,15 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
     setIsDetectedPanelCollapsed(true);
   }, []);
 
+  const handleEditDetectedText = useCallback((oldText: string, newText: string) => {
+    const normalizedOld = normalizeText(oldText);
+    setDetectedTexts((prev) =>
+      prev.map((entry) =>
+        normalizeText(entry.text) === normalizedOld ? { ...entry, text: newText } : entry
+      )
+    );
+  }, []);
+
   const hasNewDetectedToSave = useMemo(
     () =>
       detectedTexts.some(
@@ -324,6 +333,7 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
           onSave={handleSaveDetected}
           onClear={clearDetected}
           onReanalyze={handleReanalyze}
+          onEditText={handleEditDetectedText}
           hasNewToSave={hasNewDetectedToSave}
           emptyMessage="Snap and analyze a photo to extract text."
         />
