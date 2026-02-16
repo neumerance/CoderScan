@@ -8,6 +8,7 @@ Expo React Native app with **Tailwind (NativeWind)**, **camera permission**, and
 - **NativeWind v4** – Tailwind CSS for React Native (utility classes like `className="flex-1 bg-slate-100"`)
 - **expo-camera** – Camera access and permission (plugin in `app.json`)
 - **expo-media-library** – Photo library / file manager access (plugin in `app.json`)
+- **expo-text-extractor** – On-device OCR (Google ML Kit / Apple Vision) for reading text near barcodes
 
 ## Setup
 
@@ -28,6 +29,26 @@ Expo React Native app with **Tailwind (NativeWind)**, **camera permission**, and
    ```
 
    Then run on iOS simulator, Android emulator, or a physical device (Expo Go).
+
+## OCR + Dev Client
+
+OCR requires native code, so it does **not** run in Expo Go. Use a custom dev client instead:
+
+1. Build and install a development client:
+
+   ```bash
+   npx expo run:ios
+   # or
+   npx expo run:android
+   ```
+
+2. Start Metro for dev client:
+
+   ```bash
+   npx expo start --dev-client
+   ```
+
+3. Open the installed development client app on your device/simulator and connect to this project.
 
 ## Running on Android
 

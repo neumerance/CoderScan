@@ -11,6 +11,7 @@ import {
 import type { GestureResponderEvent } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import type { BarcodeScanningResult, BarcodeType } from "expo-camera";
+import { extractTextFromImage, isSupported as isOcrSupported } from "expo-text-extractor";
 
 const SUPPORTED_BARCODE_TYPES: BarcodeType[] = [
   "qr",
@@ -25,6 +26,7 @@ const SUPPORTED_BARCODE_TYPES: BarcodeType[] = [
   "code93",
 ];
 const LIVE_SCAN_COOLDOWN_MS = 250;
+const OCR_CAPTURE_COOLDOWN_MS = 1200;
 const MIN_ZOOM = 0;
 const MAX_ZOOM = 1;
 
@@ -37,9 +39,33 @@ function distance(
   return Math.hypot(x2 - x1, y2 - y1);
 }
 
+function normalizeValue(value?: string): string {
+  if (!value) return "";
+  return value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+}
+
+function extractCandidateValues(entry: { data: string; ocrText?: string }): string[] {
+  const values = [normalizeValue(entry.data), normalizeValue(entry.ocrText)].filter(Boolean);
+  return [...new Set(values)];
+}
+
+function findBestOcrLine(lines: string[], barcodeData: string): string | undefined {
+  const barcodeNormalized = normalizeValue(barcodeData);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const normalized = normalizeValue(trimmed);
+    if (!normalized || normalized === barcodeNormalized) continue;
+    if (normalized.length < 3) continue;
+    return trimmed;
+  }
+  return undefined;
+}
+
 export type ScannedBarcode = {
   data: string;
   type: string;
+  ocrText?: string;
 };
 
 type LiveDetectedBarcode = ScannedBarcode & {
@@ -58,15 +84,67 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
   );
   const [isDetectedPanelCollapsed, setIsDetectedPanelCollapsed] = useState(true);
   const [zoom, setZoom] = useState(0);
+  const cameraRef = useRef<CameraView | null>(null);
   const scannedBarcodesRef = useRef<ScannedBarcode[]>([]);
+  const liveDetectedBarcodesRef = useRef<LiveDetectedBarcode[]>([]);
   const lastLiveScanAtRef = useRef<Record<string, number>>({});
+  const ocrInFlightRef = useRef(false);
+  const lastOcrCaptureAtRef = useRef(0);
+  const ocrAttemptedRef = useRef<Record<string, boolean>>({});
   const pinchRef = useRef<{ initialDistance: number; startZoom: number } | null>(null);
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
   scannedBarcodesRef.current = scannedBarcodes;
+  liveDetectedBarcodesRef.current = liveDetectedBarcodes;
 
   const clearList = useCallback(() => {
     setScannedBarcodes([]);
+    ocrAttemptedRef.current = {};
+  }, []);
+
+  const runOcrForBarcode = useCallback(async (barcodeData: string) => {
+    if (!isOcrSupported) return;
+    if (!cameraRef.current || ocrInFlightRef.current) return;
+    const now = Date.now();
+    if (now - lastOcrCaptureAtRef.current < OCR_CAPTURE_COOLDOWN_MS) return;
+    ocrInFlightRef.current = true;
+    lastOcrCaptureAtRef.current = now;
+    try {
+      const photo = await cameraRef.current.takePictureAsync({
+        quality: 0.4,
+        skipProcessing: true,
+      });
+      if (!photo?.uri) return;
+      const lines = await extractTextFromImage(photo.uri);
+      const bestOcrLine = findBestOcrLine(lines, barcodeData);
+      if (!bestOcrLine) return;
+
+      const candidateValues = extractCandidateValues({
+        data: barcodeData,
+        ocrText: bestOcrLine,
+      });
+      const duplicateInSaved = scannedBarcodesRef.current.some((saved) => {
+        if (saved.data === barcodeData) return false;
+        return extractCandidateValues(saved).some((v) => candidateValues.includes(v));
+      });
+      if (duplicateInSaved) return;
+
+      setLiveDetectedBarcodes((prev) => {
+        const duplicateInLive = prev.some((live) => {
+          if (live.data === barcodeData) return false;
+          return extractCandidateValues(live).some((v) => candidateValues.includes(v));
+        });
+        if (duplicateInLive) return prev;
+
+        return prev.map((live) =>
+          live.data === barcodeData ? { ...live, ocrText: bestOcrLine } : live
+        );
+      });
+    } catch (error) {
+      console.warn("OCR extraction failed", error);
+    } finally {
+      ocrInFlightRef.current = false;
+    }
   }, []);
 
   const handleLiveBarcodeScanned = useCallback(
@@ -75,20 +153,43 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
       const now = Date.now();
       const last = lastLiveScanAtRef.current[data] ?? 0;
       if (now - last < LIVE_SCAN_COOLDOWN_MS) return;
+
+      const normalizedData = normalizeValue(data);
+      const duplicateInSaved = scannedBarcodesRef.current.some((saved) =>
+        extractCandidateValues(saved).includes(normalizedData)
+      );
+      if (duplicateInSaved) return;
+
+      const duplicateInLive = liveDetectedBarcodesRef.current.some((live) =>
+        extractCandidateValues(live).includes(normalizedData)
+      );
+      if (duplicateInLive) return;
+
       lastLiveScanAtRef.current[data] = now;
       setLiveDetectedBarcodes((prev) => {
-        if (prev.some((b) => b.data === data)) return prev;
         return [...prev, { data, type, selected: true }];
       });
+      if (!ocrAttemptedRef.current[data]) {
+        ocrAttemptedRef.current[data] = true;
+        void runOcrForBarcode(data);
+      }
     },
-    []
+    [runOcrForBarcode]
   );
 
   const handleSaveDetected = useCallback(() => {
-    const existing = new Set(scannedBarcodesRef.current.map((b) => b.data));
-    const toAdd = liveDetectedBarcodes
-      .filter((b) => b.selected && !existing.has(b.data))
-      .map((b) => ({ data: b.data, type: b.type }));
+    const existingValues = new Set(
+      scannedBarcodesRef.current.flatMap((barcode) => extractCandidateValues(barcode))
+    );
+    const toAdd: ScannedBarcode[] = [];
+    for (const barcode of liveDetectedBarcodes) {
+      if (!barcode.selected) continue;
+      const candidateValues = extractCandidateValues(barcode);
+      const hasDuplicate = candidateValues.some((value) => existingValues.has(value));
+      if (hasDuplicate) continue;
+      toAdd.push({ data: barcode.data, type: barcode.type, ocrText: barcode.ocrText });
+      candidateValues.forEach((value) => existingValues.add(value));
+    }
     if (toAdd.length > 0) {
       setScannedBarcodes((prev) => [...prev, ...toAdd]);
     }
@@ -97,10 +198,16 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
   const clearDetected = useCallback(() => {
     setLiveDetectedBarcodes([]);
     lastLiveScanAtRef.current = {};
+    ocrAttemptedRef.current = {};
   }, []);
 
   const toggleDetectedSelection = useCallback((data: string) => {
-    const isAlreadySaved = scannedBarcodesRef.current.some((b) => b.data === data);
+    const target = liveDetectedBarcodesRef.current.find((b) => b.data === data);
+    if (!target) return;
+    const targetValues = extractCandidateValues(target);
+    const isAlreadySaved = scannedBarcodesRef.current.some((saved) =>
+      extractCandidateValues(saved).some((value) => targetValues.includes(value))
+    );
     if (isAlreadySaved) return;
     setLiveDetectedBarcodes((prev) =>
       prev.map((b) => (b.data === data ? { ...b, selected: !b.selected } : b))
@@ -204,7 +311,13 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
       ? [styles.container, { width: screenWidth, height: screenHeight }]
       : styles.container;
   const hasNewDetectedToSave = liveDetectedBarcodes.some(
-    (b) => b.selected && !scannedBarcodesRef.current.some((s) => s.data === b.data)
+    (b) =>
+      b.selected &&
+      !scannedBarcodesRef.current.some((saved) =>
+        extractCandidateValues(saved).some((value) =>
+          extractCandidateValues(b).includes(value)
+        )
+      )
   );
 
   return (
@@ -216,9 +329,11 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
         onTouchEnd={handleTouchEnd}
       >
         <CameraView
+          ref={cameraRef}
           style={cameraStyle}
           facing="back"
           autofocus="on"
+          animateShutter={false}
           zoom={zoom}
           barcodeScannerSettings={{ barcodeTypes: SUPPORTED_BARCODE_TYPES }}
           onBarcodeScanned={handleLiveBarcodeScanned}
@@ -283,8 +398,11 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
                   </Text>
                 ) : (
                   liveDetectedBarcodes.map((b, i) => {
-                    const alreadySaved = scannedBarcodesRef.current.some(
-                      (saved) => saved.data === b.data
+                    const currentValues = extractCandidateValues(b);
+                    const alreadySaved = scannedBarcodesRef.current.some((saved) =>
+                      extractCandidateValues(saved).some((value) =>
+                        currentValues.includes(value)
+                      )
                     );
                     return (
                     <View
@@ -316,6 +434,15 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
                         >
                           {b.data}
                         </Text>
+                        {b.ocrText ? (
+                          <Text
+                            className="text-emerald-300 text-xs mt-0.5"
+                            numberOfLines={1}
+                            ellipsizeMode="tail"
+                          >
+                            OCR: {b.ocrText}
+                          </Text>
+                        ) : null}
                       </View>
                       {alreadySaved ? (
                         <View style={styles.savedBadge}>
