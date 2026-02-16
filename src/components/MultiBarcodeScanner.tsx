@@ -9,11 +9,7 @@ import {
   View,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
-import type {
-  BarcodeBounds,
-  BarcodeScanningResult,
-  BarcodeType,
-} from "expo-camera";
+import type { BarcodeScanningResult, BarcodeType } from "expo-camera";
 
 const SUPPORTED_BARCODE_TYPES: BarcodeType[] = [
   "qr",
@@ -28,7 +24,6 @@ const SUPPORTED_BARCODE_TYPES: BarcodeType[] = [
   "code93",
 ];
 const LIVE_SCAN_COOLDOWN_MS = 1200;
-const LIVE_SAVED_OVERLAY_TTL_MS = 1200;
 
 export type ScannedBarcode = {
   data: string;
@@ -37,11 +32,6 @@ export type ScannedBarcode = {
 
 type LiveDetectedBarcode = ScannedBarcode & {
   selected: boolean;
-};
-
-type LiveSavedOverlay = {
-  id: string;
-  bounds: BarcodeBounds;
 };
 
 type MultiBarcodeScannerProps = {
@@ -54,7 +44,6 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
   const [liveDetectedBarcodes, setLiveDetectedBarcodes] = useState<LiveDetectedBarcode[]>(
     []
   );
-  const [liveSavedOverlays, setLiveSavedOverlays] = useState<LiveSavedOverlay[]>([]);
   const [isDetectedPanelCollapsed, setIsDetectedPanelCollapsed] = useState(true);
   const scannedBarcodesRef = useRef<ScannedBarcode[]>([]);
   const lastLiveScanAtRef = useRef<Record<string, number>>({});
@@ -64,44 +53,19 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
     setScannedBarcodes([]);
   }, []);
 
-  const isValidBounds = useCallback((bounds: BarcodeBounds): boolean => {
-    const { origin, size } = bounds;
-    return (
-      size != null &&
-      typeof size.width === "number" &&
-      typeof size.height === "number" &&
-      size.width > 0 &&
-      size.height > 0 &&
-      origin != null &&
-      typeof origin.x === "number" &&
-      typeof origin.y === "number"
-    );
-  }, []);
-
   const handleLiveBarcodeScanned = useCallback(
     (result: BarcodeScanningResult) => {
-      const { data, type, bounds } = result;
+      const { data, type } = result;
       const now = Date.now();
       const last = lastLiveScanAtRef.current[data] ?? 0;
       if (now - last < LIVE_SCAN_COOLDOWN_MS) return;
       lastLiveScanAtRef.current[data] = now;
-      const alreadySaved = scannedBarcodesRef.current.some((b) => b.data === data);
-      if (alreadySaved && isValidBounds(bounds)) {
-        const overlayId = `${data}-${now}`;
-        setLiveSavedOverlays((prev) => {
-          const withoutSameData = prev.filter((o) => !o.id.startsWith(`${data}-`));
-          return [...withoutSameData, { id: overlayId, bounds }];
-        });
-        setTimeout(() => {
-          setLiveSavedOverlays((prev) => prev.filter((o) => o.id !== overlayId));
-        }, LIVE_SAVED_OVERLAY_TTL_MS);
-      }
       setLiveDetectedBarcodes((prev) => {
         if (prev.some((b) => b.data === data)) return prev;
         return [...prev, { data, type, selected: true }];
       });
     },
-    [isValidBounds]
+    []
   );
 
   const handleSaveDetected = useCallback(() => {
@@ -116,7 +80,6 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
 
   const clearDetected = useCallback(() => {
     setLiveDetectedBarcodes([]);
-    setLiveSavedOverlays([]);
     lastLiveScanAtRef.current = {};
   }, []);
 
@@ -188,21 +151,6 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
           barcodeScannerSettings={{ barcodeTypes: SUPPORTED_BARCODE_TYPES }}
           onBarcodeScanned={handleLiveBarcodeScanned}
         />
-        {liveSavedOverlays.map((overlay) => (
-          <View
-            key={overlay.id}
-            pointerEvents="none"
-            style={[
-              styles.liveSavedBoundsOverlay,
-              {
-                left: overlay.bounds.origin.x,
-                top: overlay.bounds.origin.y,
-                width: overlay.bounds.size.width,
-                height: overlay.bounds.size.height,
-              },
-            ]}
-          />
-        ))}
       </View>
       <View style={styles.overlay} pointerEvents="box-none">
         <View className="flex-row justify-between items-center pt-12 px-4">
@@ -405,13 +353,6 @@ const styles = StyleSheet.create({
   checkboxIndicatorChecked: {
     backgroundColor: "rgba(34, 197, 94, 0.95)",
     borderColor: "rgba(34, 197, 94, 0.95)",
-  },
-  liveSavedBoundsOverlay: {
-    position: "absolute",
-    borderWidth: 2,
-    borderColor: "rgba(34, 197, 94, 0.95)",
-    borderRadius: 6,
-    backgroundColor: "rgba(34, 197, 94, 0.12)",
   },
   checkboxIndicatorCheckText: {
     color: "#fff",
