@@ -4,22 +4,22 @@ Expo React Native app with **Tailwind (NativeWind)**, **camera permission**, and
 
 ## Stack
 
-- **Expo SDK 52** – React Native tooling and runtime
+- **Expo SDK 54** – React Native tooling and runtime (compatible with Expo Go on device)
 - **NativeWind v4** – Tailwind CSS for React Native (utility classes like `className="flex-1 bg-slate-100"`)
 - **expo-camera** – Camera access and permission (plugin in `app.json`)
 - **expo-media-library** – Photo library / file manager access (plugin in `app.json`)
 
 ## Setup
 
-1. **Use Node 20** (recommended; or 18+). If you use `asdf`: `asdf set nodejs 20.19.2` (or add a `.tool-versions` with `nodejs 20.19.2`).
+1. **Use Node 20.19.4+** (required for SDK 54). If you use `asdf`: `asdf set nodejs 20.19.4` (or add a `.tool-versions` with `nodejs 20.19.4`).
 
 2. **Install dependencies**:
 
    ```bash
-   npm install
+   npm install --legacy-peer-deps
    ```
 
-   To align Expo-related package versions: `npx expo install`
+   Use `--legacy-peer-deps` if you see peer dependency conflicts; the project is aligned to Expo SDK 54.
 
 3. **Start the app**:
 

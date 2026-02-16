@@ -6,6 +6,7 @@ import {
   ScrollView,
   StyleSheet,
   Dimensions,
+  Platform,
 } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import type {
@@ -151,19 +152,37 @@ export function MultiBarcodeScanner({ onClose }: MultiBarcodeScannerProps) {
     );
   }
 
-  const { height: screenHeight } = Dimensions.get("window");
+  const { width: screenWidth, height: screenHeight } = Dimensions.get("window");
   const showBoundsIndicator =
     alreadyScannedIndicator &&
     isValidBounds(alreadyScannedIndicator.bounds);
 
+  const cameraStyle =
+    Platform.OS === "ios"
+      ? {
+          position: "absolute" as const,
+          top: 0,
+          left: 0,
+          width: screenWidth,
+          height: screenHeight,
+        }
+      : styles.camera;
+
+  const containerStyle =
+    Platform.OS === "ios"
+      ? [styles.container, { width: screenWidth, height: screenHeight }]
+      : styles.container;
+
   return (
-    <View style={styles.container}>
-      <CameraView
-        style={styles.camera}
-        facing="back"
-        barcodeScannerSettings={{ barcodeTypes: SUPPORTED_BARCODE_TYPES }}
-        onBarcodeScanned={handleBarcodeScanned}
-      />
+    <View style={containerStyle}>
+      <View style={styles.cameraWrapper}>
+        <CameraView
+          style={cameraStyle}
+          facing="back"
+          barcodeScannerSettings={{ barcodeTypes: SUPPORTED_BARCODE_TYPES }}
+          onBarcodeScanned={handleBarcodeScanned}
+        />
+      </View>
       <View style={styles.overlay} pointerEvents="box-none">
         {alreadyScannedIndicator && (
           <>
@@ -275,6 +294,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#000",
+  },
+  cameraWrapper: {
+    ...StyleSheet.absoluteFillObject,
   },
   camera: {
     ...StyleSheet.absoluteFillObject,
