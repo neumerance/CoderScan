@@ -2,12 +2,17 @@ import { useRef } from "react";
 import {
   FlatList,
   Image,
+  LayoutAnimation,
+  Platform,
   StyleSheet,
   Text,
   TouchableOpacity,
+  UIManager,
   View,
 } from "react-native";
-import Swipeable from "react-native-gesture-handler/Swipeable";
+import type { SharedValue } from "react-native-reanimated";
+import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
+import type { SwipeableMethods } from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useSavedScans, type SavedScan } from "../contexts/SavedScansContext";
 
@@ -24,18 +29,31 @@ function formatDate(ts: number): string {
   });
 }
 
+if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
 export function DataScreen({ onOpenScan }: DataScreenProps) {
   const { scans, deleteScan } = useSavedScans();
   const insets = useSafeAreaInsets();
-  const swipeableRefs = useRef<Record<string, Swipeable>>({});
+  const swipeableRefs = useRef<Record<string, SwipeableMethods | null>>({});
 
-  const renderRightActions = (item: SavedScan) => () => (
+  const handleDelete = (item: SavedScan) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    delete swipeableRefs.current[item.id];
+    deleteScan(item.id);
+  };
+
+  const renderRightActions = (
+    item: SavedScan
+  ) => (
+    _progress: SharedValue<number>,
+    _translation: SharedValue<number>,
+    _swipeableMethods: SwipeableMethods
+  ) => (
     <TouchableOpacity
       style={styles.deleteAction}
-      onPress={() => {
-        delete swipeableRefs.current[item.id];
-        deleteScan(item.id);
-      }}
+      onPress={() => handleDelete(item)}
       activeOpacity={0.8}
     >
       <Text style={styles.deleteActionText}>Delete</Text>
@@ -65,7 +83,7 @@ export function DataScreen({ onOpenScan }: DataScreenProps) {
           renderItem={({ item }) => (
             <Swipeable
               ref={(ref) => {
-                if (ref) swipeableRefs.current[item.id] = ref;
+                swipeableRefs.current[item.id] = ref;
               }}
               renderRightActions={renderRightActions(item)}
               onSwipeableOpen={() => {
@@ -73,7 +91,9 @@ export function DataScreen({ onOpenScan }: DataScreenProps) {
                   if (id !== item.id) r?.close();
                 });
               }}
-              overshootRight={false}
+              overshootRight={true}
+              overshootFriction={10}
+              friction={1}
             >
               <TouchableOpacity
                 style={styles.item}
