@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "coderscan",
+    "slug": "coderscan",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.coderscan.app"
+    },
+    "android": {
+      "package": "com.coderscan.app"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow $(PRODUCT_NAME) to access your camera.",
+          "microphonePermission": "Allow $(PRODUCT_NAME) to access your microphone for video recording.",
+          "recordAudioAndroid": true
+        }
+      ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos and files.",
+          "savePhotosPermission": "Allow $(PRODUCT_NAME) to save photos and files.",
+          "isAccessMediaLocationEnabled": false,
+          "granularPermissions": ["photo", "video", "audio"]
+        }
+      ]
+    ],
+    "scheme": "coderscan"
+  }
+}
